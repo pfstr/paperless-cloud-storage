@@ -1,0 +1,45 @@
+services:
+  broker:
+    image: redis:8
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    volumes:
+      # postgres:18 expects the mount here, no longer at .../data
+      - pgdata:/var/lib/postgresql
+    environment:
+      POSTGRES_DB: paperless
+      POSTGRES_USER: paperless
+      POSTGRES_PASSWORD: change-me
+
+  webserver:
+    image: ghcr.io/paperless-ngx/paperless-ngx:3.0.2
+    restart: unless-stopped
+    depends_on:
+      - db
+      - broker
+    ports:
+      - "8000:8000"
+    volumes:
+      # Search index and working data stay local (fast, needs locking)
+      - data:/usr/src/paperless/data
+      - ./consume:/usr/src/paperless/consume
+      - ./export:/usr/src/paperless/export
+      # CRITICAL: propagation rslave — without it the container keeps a dead
+      # FUSE mount after an rclone restart ("Transport endpoint is not
+      # connected") and needs a full restart to recover.
+      - type: bind
+        source: ./media
+        target: /usr/src/paperless/media
+        bind:
+          propagation: rslave
+    env_file: ./paperless.env
+
+volumes:
+  data:
+  pgdata:
+  redisdata:

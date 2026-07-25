@@ -1,0 +1,42 @@
+# rclone mount for the Paperless document store.
+# Install:
+#   sudo cp rclone-paperless-media.service /etc/systemd/system/
+#   edit User/Group and the three paths below
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now rclone-paperless-media
+#
+# Requires on the host:
+#   - rclone with a configured remote (here: "paperless-storage:")
+#   - "user_allow_other" in /etc/fuse.conf
+
+[Unit]
+Description=rclone mount: Paperless document store (cloud-backed)
+Wants=network-online.target
+After=network-online.target
+AssertPathIsDirectory=%h/paperless/media/documents/originals
+
+[Service]
+Type=notify
+User=paperless
+Group=paperless
+# --allow-other        : the container user must be able to read the mount
+# --vfs-cache-mode full: required for random access; caches read files
+# Cache size/age: tune to your disk. NOTE: the limit is enforced by a cleanup
+# run about once per minute — during bursts the cache overshoots it.
+ExecStart=/usr/local/bin/rclone mount \
+  paperless-storage:paperless/originals %h/paperless/media/documents/originals \
+  --config %h/.config/rclone/rclone.conf \
+  --vfs-cache-mode full \
+  --vfs-cache-max-size 1G \
+  --vfs-cache-max-age 720h \
+  --dir-cache-time 1h \
+  --allow-other \
+  --cache-dir %h/paperless/cache \
+  --log-file %h/paperless/rclone.log \
+  --log-level INFO
+ExecStop=/bin/fusermount3 -u %h/paperless/media/documents/originals
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

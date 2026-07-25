@@ -1,0 +1,6 @@
+paperless.env
+media/
+consume/
+export/
+cache/
+*.log
