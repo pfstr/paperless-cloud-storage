@@ -4,7 +4,20 @@ Run [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx) on a small d
 
 > **Status: experimental.** Verified working in both directions (serving documents and consuming new ones, integrity check passes), but without long-term production data yet. Read [What can go wrong](#what-can-go-wrong) before trusting it with documents you cannot lose.
 
-Works with any rclone backend. Tested with Proton Drive; an S3-compatible store is the more robust choice if you do not need Proton's end-to-end encryption.
+## Works with any rclone backend
+
+The provider is fully abstracted by rclone: the mount, the VFS cache, the `rslave` propagation and the watchdog are identical for every one of the [70+ supported backends](https://rclone.org/overview/) — S3-compatible stores, Backblaze B2, OneDrive, Google Drive, WebDAV, SFTP, Proton Drive, and so on. Switching providers means changing **only the remote configuration** (`rclone config`) and the remote name in the mount unit; nothing else in this template.
+
+What differs per backend:
+
+| Concern | Notes |
+|---|---|
+| Unattended auth | Must work without interactive prompts. Proton with 2FA breaks after ~35 min (see below); S3 key pairs or service accounts are unproblematic. |
+| Change notifications | Some backends push changes (polling works); Proton does not (`poll-interval is not supported`) — relevant only if `consume/` is cloud-backed. |
+| Maturity | S3/B2 backends are battle-tested; Proton Drive is explicitly beta in rclone. |
+| Encryption | Proton offers end-to-end encryption out of the box; for other backends, layer [rclone crypt](https://rclone.org/crypt/) on top if needed. |
+
+Tested with Proton Drive; an S3-compatible store is the more robust choice if you do not need Proton's end-to-end encryption.
 
 ## How it works
 
