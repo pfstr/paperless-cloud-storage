@@ -8,19 +8,28 @@ Cloud setup happens in a **browser**, through rclone's built-in web GUI. No `rcl
 
 ## What you actually have to type
 
+On the server, inside the cloned repository:
+
 ```bash
+cd paperless-cloud-storage
 sudo ./setup.sh                                   # once, prepares the host
 cp .env.example .env && $EDITOR .env              # base dir + a GUI password
-docker compose -f storage.yml up -d       # starts the storage layer
+docker compose -f storage.yml up -d               # starts the storage layer
 ```
 
-Everything after that — connecting the cloud account, creating and managing mounts, watching transfers — happens in the web UI. Reach it through an SSH tunnel:
+Everything after that — connecting the cloud account, creating and managing mounts, watching transfers — happens in the web UI. Reach it through an SSH tunnel. **Run this on your own computer, in a new terminal — not inside the SSH session on the server** (running it on the server creates a tunnel from the server to itself that shadows the real port):
 
 ```bash
 ssh -L 5522:localhost:5522 -L 5533:localhost:5533 <your-host>
 ```
 
-then open `http://localhost:5522/login?url=localhost:5533`.
+then open:
+
+```
+http://localhost:5522/login?url=http%3A%2F%2Flocalhost%3A5533
+```
+
+The `url` parameter must be a full URL including `http://` (URL-encoded as above) — with just `localhost:5533` the login page reports "URL is not configured". Log in with the user and password from your `.env`.
 
 In the GUI, add your cloud remote, then create the mount at **`/mnt/inner/documents/originals`** with VFS cache mode `full` and **allow other** enabled. A helper inside the container (`bind-publish.sh`) automatically mirrors everything mounted under `/mnt/inner` to the host — a few seconds later it appears at `$BASE_DIR/media/documents/originals`, where Paperless picks it up. (Why the detour via `/mnt/inner`: see critical detail 2 below.)
 

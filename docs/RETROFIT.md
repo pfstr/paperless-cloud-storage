@@ -55,7 +55,7 @@ Open the GUI through an SSH tunnel and add your remote:
 ssh -L 5522:localhost:5522 -L 5533:localhost:5533 <your-host>
 ```
 
-Then browse to `http://localhost:5522/login?url=localhost:5533`.
+Then browse to `http://localhost:5522/login?url=http%3A%2F%2Flocalhost%3A5533`.
 
 **Do not create the mount yet.** First the existing files have to go up.
 
