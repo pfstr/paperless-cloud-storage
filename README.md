@@ -57,14 +57,22 @@ Measured on a small home server (single measurements, orders of magnitude): firs
 
 **4. Stop on missing mount.** When the mount is down, the media path is a plain empty directory. Paperless would happily consume documents into it; the moment the mount returns, those files are shadowed by the mount point — present on disk, invisible to everything. The watchdog stops the webserver first and only starts it again once the mount is verified alive.
 
-## Choosing the cloud account
+## Choosing the cloud account, and how 2FA fits in
 
-Use a **dedicated cloud account** holding nothing but these documents. It must be able to sign in unattended:
+Use a **dedicated cloud account** holding nothing but these documents. It must be able to sign in unattended — no service can answer an interactive 2FA prompt at 3 a.m.
 
-- **no 2FA** on that dedicated account (recommended), **or**
-- store the TOTP seed in the rclone config — which defeats 2FA for that account, and is only acceptable because the account is dedicated.
+The industry answer to this is machine credentials: S3 access keys and service accounts are exactly that — credentials that bypass interactive 2FA by design. Proton has no separate machine credentials, but the equivalent exists: **enable 2FA and store its TOTP secret in the rclone config** (the wizard asks for it). rclone then generates the codes itself.
 
-With Proton Drive specifically: a session established with a one-time 2FA code dies after ~35 minutes and cannot re-authenticate (`422 .../auth/v4/2fa`). This is why the account choice matters.
+Be clear about what that does and does not protect:
+
+| Attack | Protected? |
+|---|---|
+| Password leaked (phishing, reuse, credential stuffing) | **Yes, fully** — the attacker does not have the TOTP secret |
+| Server compromised | No — but the rclone config on that server holds the (reversibly obscured) password anyway; 2FA never defended this case |
+
+So "2FA on + secret stored" is strictly better than "2FA off". The dedicated account limits the blast radius either way, and Proton's end-to-end encryption keeps the content itself protected.
+
+Why a one-time code does not work: a Proton session established with a typed 2FA code dies after ~35 minutes and cannot re-authenticate unattended (`422 .../auth/v4/2fa`) — rclone would re-send the long-expired code. Observed symptoms are shifting directory listings, then nothing.
 
 ## Settings explained (`paperless.env.example`)
 

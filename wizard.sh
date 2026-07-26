@@ -82,14 +82,28 @@ fi
 case "$CHOICE" in
   1)
     say ""
-    say "Use a DEDICATED Proton account without two-factor authentication —"
-    say "sessions from a one-time 2FA code expire after ~35 minutes and cannot"
-    say "renew unattended (see README: choosing the cloud account)."
+    say "Use a DEDICATED Proton account holding nothing but these documents."
+    say ""
+    say "If the account has two-factor authentication, enter its TOTP secret"
+    say "below — the Base32 string ('secret key' / 'can't scan?') shown when"
+    say "setting 2FA up. rclone then generates the codes itself. This keeps"
+    say "2FA protecting you against password leaks; a one-time code instead"
+    say "would expire after ~35 minutes and break the mount. If you skipped"
+    say "2FA on this dedicated account, leave it empty."
     say ""
     ask "Proton e-mail"; P_USER=$REPLY
     ask_secret "Proton password"; P_PASS=$(obscure "$REPLY")
-    rc config create "$REMOTE" protondrive username "$P_USER" password "$P_PASS" \
-        --no-obscure >/dev/null || die "creating the remote failed"
+    ask_secret "TOTP secret (Base32, empty if no 2FA)"; P_OTP=$REPLY
+    if [ -n "$P_OTP" ]; then
+        P_OTP=$(obscure "$(printf '%s' "$P_OTP" | tr -d ' ')")
+        rc config create "$REMOTE" protondrive username "$P_USER" \
+            password "$P_PASS" otp_secret_key "$P_OTP" \
+            --no-obscure >/dev/null || die "creating the remote failed"
+    else
+        rc config create "$REMOTE" protondrive username "$P_USER" \
+            password "$P_PASS" \
+            --no-obscure >/dev/null || die "creating the remote failed"
+    fi
     ;;
   2)
     ask "Endpoint URL (empty for AWS)"; S_EP=$REPLY
