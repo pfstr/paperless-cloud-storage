@@ -45,23 +45,16 @@ shared mount point. See the script header for why that is required.
 ## 2. Set up the cloud remote
 
 ```bash
-cp .env.example .env      # set BASE_DIR and RCLONE_GUI_PASS
-docker compose -f storage.yml up -d
+./wizard.sh
 ```
 
-Open the GUI through an SSH tunnel and add your remote:
+Pick your provider and enter the credentials; the wizard verifies the
+connection with a real upload/download round trip, writes the mount
+definition and starts the storage container. Use `paperless/originals` as
+the cloud folder (the default).
 
-```bash
-ssh -L 5522:localhost:5522 -L 5533:localhost:5533 <your-host>
-```
-
-Then get the ready-made login link on the server and open it exactly as printed (it uses `127.0.0.1`, which must match):
-
-```bash
-docker logs rclone-web 2>&1 | grep "GUI available"
-```
-
-**Do not create the mount yet.** First the existing files have to go up.
+The wizard's mount will initially show an empty cloud folder — that is
+expected, your existing files go up in the next step.
 
 ## 3. Move the existing documents into the cloud
 
@@ -71,57 +64,64 @@ Stop Paperless so nothing changes underneath you:
 docker compose stop webserver
 ```
 
-**Bind mount case** — copy straight from the old directory:
+Upload the originals from wherever your old media lives, using a throwaway
+rclone container with the wizard's credentials.
 
-```bash
-docker compose -f storage.yml exec rclone \
-  rclone copy /data/documents/originals <remote>:paperless/originals --progress
-```
-
-If your old media directory is not yet `/srv/paperless/media`, move it there
-first (`rsync -a old/media/ /srv/paperless/media/`).
-
-**Named volume case** — copy the volume contents out first:
+**Bind mount case** (old media in a directory):
 
 ```bash
 docker run --rm \
-  -v <your_media_volume>:/from \
-  -v /srv/paperless/media:/to \
-  alpine sh -c 'cp -a /from/. /to/'
+  -v /srv/paperless/rclone-config:/config/rclone \
+  -v /path/to/old/media:/old:ro \
+  rclone/rclone copy /old/documents/originals cloud:paperless/originals --progress
 ```
 
-Then upload as in the bind mount case.
+**Named volume case** — mount the volume instead of a path:
+
+```bash
+docker run --rm \
+  -v /srv/paperless/rclone-config:/config/rclone \
+  -v <your_media_volume>:/old:ro \
+  rclone/rclone copy /old/documents/originals cloud:paperless/originals --progress
+```
+
+The parts that stay **local** — `thumbnails/` and (if you keep it)
+`archive/` — must move into the new base directory, because Paperless will
+mount `$BASE_DIR/media` as its media root from now on:
+
+```bash
+rsync -a /path/to/old/media/documents/thumbnails /srv/paperless/media/documents/
+rsync -a /path/to/old/media/documents/archive    /srv/paperless/media/documents/
+```
+
+(Named volume: copy them out with the same `alpine cp` pattern first.)
 
 Decide what to offload:
 
 - **`originals/` only** — the safe default. Paperless serves the archive copy
   locally, so the cloud is barely touched in normal use.
-- **`originals/` and `archive/`** — maximum saving. Consider setting
+- **`originals/` and `archive/`** — maximum saving. Add a second wizard run /
+  `mounts.conf` line for `archive`, and consider
   `PAPERLESS_ARCHIVE_FILE_GENERATION=never` so the second copy stops being
   created at all.
 
-## 4. Create the mount
+## 4. Refresh the mount and verify
 
-In the rclone web UI, go to **Mounts → new mount**:
+The mount was created before the upload, so its directory listing may be
+stale. Restart the storage container to pick everything up:
 
-- Remote: `<remote>:paperless/originals`
-- Mount point: `/mnt/inner/documents/originals`
-- VFS cache mode: `full`
-- **Allow other: enabled** (Paperless runs as a different uid than the mount)
-- Cache size limit: e.g. `1G`
+```bash
+docker compose -f storage.yml restart
+```
 
-The mount must sit under **`/mnt/inner/...`** — AppArmor on the host only
-permits FUSE mounts on that path pattern (see README, critical detail 2).
-`bind-publish.sh` inside the container then mirrors it to `/data/...`
-automatically, which is the shared bind that reaches the host and therefore
-Paperless. Allow a few seconds for it to appear.
-
-Verify on the host:
+Then verify on the host:
 
 ```bash
 mountpoint /srv/paperless/media/documents/originals && \
   ls /srv/paperless/media/documents/originals | head
 ```
+
+You should see your document files.
 
 ## 5. Point Paperless at it
 

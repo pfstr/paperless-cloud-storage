@@ -1,49 +1,30 @@
 # Cloud storage layer — independent of Paperless.
 #
-# One container does both jobs: it serves rclone's built-in web GUI (guided
-# remote setup, mount management) and it performs the FUSE mount itself.
-# rclone ships the GUI inside the binary since v1.74, so no extra image.
+# One container mounts every entry from mounts.conf (written by ./wizard.sh)
+# and publishes the mounts to the host, from where Paperless consumes them.
+# No web UI, no open ports: configuration happens through ./wizard.sh, and
+# mount definitions persist in $BASE_DIR/rclone-config/mounts.conf.
 #
-# Run:  docker compose -f compose/storage.yml up -d
-# Then: open the GUI and add your remote + mount (see README).
+# Self-healing: if a mount dies, the container exits and Docker restarts it;
+# Paperless picks the fresh mount up without a restart of its own (rslave).
 #
 # Prerequisite: sudo ./setup.sh — the media directory must be a SHARED mount
-# point or the container cannot publish its mount to the host.
+# point or the container cannot publish its mounts to the host.
+#
+# Run:  docker compose -f storage.yml up -d   (wizard.sh does this for you)
 
 services:
   rclone:
     image: rclone/rclone:latest
-    container_name: rclone-web
+    container_name: rclone-mounts
     restart: unless-stopped
 
-    # The GUI is served on 5522, the RC API it talks to on 5533.
-    # bind-publish.sh mirrors mounts created under /mnt/inner to the host-shared
-    # /data — see the script header for why FUSE cannot mount there directly.
-    #
-    # host networking + binding to localhost: the gui command derives its CORS
-    # allow-origin from --addr. Binding 0.0.0.0 behind a port mapping yields
-    # an origin of "http://[::]:5522", which never matches the browser's
-    # "http://localhost:5522" — every API call then fails with
-    # "Failed to fetch". With host networking and --addr=localhost the origin
-    # matches, and the ports stay loopback-only exactly as before.
-    network_mode: host
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >
-        /bin/sh /usr/local/bin/bind-publish.sh &
-        exec rclone gui --no-open-browser
-        --addr=localhost:5522 --api-addr=localhost:5533
-        --user="$${RCLONE_GUI_USER:-admin}" --pass="$${RCLONE_GUI_PASS}"
-    environment:
-      RCLONE_GUI_USER: ${RCLONE_GUI_USER:-admin}
-      RCLONE_GUI_PASS: ${RCLONE_GUI_PASS:?set RCLONE_GUI_PASS in .env}
+    entrypoint: ["/bin/sh", "/usr/local/bin/mount-runner.sh"]
 
-    # SECURITY: bound to the host's loopback only (via --addr above). Anyone
-    # who reaches this UI can read your cloud credentials and create mounts.
-    # Reach it through an SSH tunnel
-    #   ssh -L 5522:localhost:5522 -L 5533:localhost:5533 <host>
-    # or put a reverse proxy with authentication in front of it. Do not
-    # expose these ports to the network.
+    environment:
+      # Upper bound for the local VFS cache. Enforced by a cleanup pass about
+      # once per minute — during bursts the cache can temporarily exceed it.
+      VFS_CACHE_MAX: ${VFS_CACHE_MAX:-1G}
 
     # FUSE inside a container needs all three of these.
     cap_add:
@@ -54,14 +35,13 @@ services:
       - apparmor:unconfined
 
     volumes:
-      # rclone.conf lives here — this is where your cloud credentials end up.
+      # rclone.conf + mounts.conf — cloud credentials and mount definitions.
       - ${BASE_DIR:?set BASE_DIR in .env}/rclone-config:/config/rclone
       # VFS cache: bounds how much of the archive is held locally.
       - ${BASE_DIR:?}/cache:/cache
-      # publishes /inner mounts to /data (see script header for why)
-      - ./bind-publish.sh:/usr/local/bin/bind-publish.sh:ro
-      # rshared: lets the mount created inside this container appear on the
-      # host, from where Paperless picks it up via rslave.
+      - ./mount-runner.sh:/usr/local/bin/mount-runner.sh:ro
+      # rshared: lets mounts created inside this container appear on the
+      # host, from where Paperless picks them up via rslave.
       - type: bind
         source: ${BASE_DIR:?}/media
         target: /data
@@ -69,10 +49,10 @@ services:
           propagation: rshared
 
     healthcheck:
-      test: ["CMD", "rclone", "rc", "--url", "127.0.0.1:5533",
-             "--user", "${RCLONE_GUI_USER:-admin}", "--pass", "${RCLONE_GUI_PASS}",
-             "core/version"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
+      # healthy = every configured mount answers
+      test: ["CMD", "/bin/sh", "-c",
+             "grep -vE '^\\s*(#|$$)' /config/rclone/mounts.conf | while read -r fs rel _; do grep -q \" /mnt/inner/$$rel \" /proc/self/mountinfo && timeout 10 ls /mnt/inner/$$rel >/dev/null || exit 1; done"]
+      interval: 60s
+      timeout: 30s
+      retries: 2
+      start_period: 60s
