@@ -11,13 +11,21 @@
 
 set -u
 
-MOUNTPOINT="${MOUNTPOINT:-$HOME/paperless/media/documents/originals}"
-COMPOSE_DIR="${COMPOSE_DIR:-$HOME/paperless}"
-MARKER="$COMPOSE_DIR/.watchdog-stopped"
+BASE_DIR="${BASE_DIR:-/srv/paperless}"
+MOUNTPOINT="${MOUNTPOINT:-$BASE_DIR/media/documents/originals}"
+
+# Compose file that defines the Paperless webserver. For an existing
+# installation, point this at your own compose file.
+PAPERLESS_COMPOSE="${PAPERLESS_COMPOSE:-$(dirname "$0")/paperless.yml}"
+SERVICE="${SERVICE:-webserver}"
+MARKER="${MARKER:-$BASE_DIR/.watchdog-stopped}"
+
+compose() { docker compose -f "$PAPERLESS_COMPOSE" "$@"; }
 
 mount_ok() {
-    # mountpoint -q exits non-zero both when nothing is mounted and when the
-    # mount is dead ("Transport endpoint is not connected").
+    # mountpoint -q fails both when nothing is mounted and when the mount is
+    # dead ("Transport endpoint is not connected"). The ls confirms the mount
+    # actually answers rather than just existing in the mount table.
     mountpoint -q "$MOUNTPOINT" && timeout 15 ls "$MOUNTPOINT" > /dev/null 2>&1
 }
 
@@ -25,7 +33,7 @@ if mount_ok; then
     if [ -f "$MARKER" ]; then
         echo "$(date -Is) mount is back — starting Paperless"
         rm -f "$MARKER"
-        (cd "$COMPOSE_DIR" && docker compose start webserver)
+        compose start "$SERVICE"
     fi
     exit 0
 fi
@@ -34,16 +42,16 @@ echo "$(date -Is) mount missing or dead"
 
 # 1) Stop Paperless FIRST so nothing writes into the bare directory.
 if [ ! -f "$MARKER" ]; then
-    echo "$(date -Is) stopping Paperless webserver"
-    (cd "$COMPOSE_DIR" && docker compose stop webserver)
+    echo "$(date -Is) stopping Paperless"
+    compose stop "$SERVICE"
     touch "$MARKER"
 fi
 
-# 2) Clear a dead mount so systemd's restart can mount over it again.
+# 2) Clear a dead mount so the next mount attempt can take the path again.
 if mountpoint -q "$MOUNTPOINT"; then
     fusermount3 -u "$MOUNTPOINT" 2>/dev/null || fusermount3 -uz "$MOUNTPOINT" 2>/dev/null
 fi
 
-# 3) The rclone systemd unit has Restart=always and will bring the mount back;
-#    the next watchdog run then restarts Paperless.
+# 3) The rclone container restarts on its own (restart: unless-stopped) and
+#    re-establishes the mount; the next watchdog run then starts Paperless.
 exit 1

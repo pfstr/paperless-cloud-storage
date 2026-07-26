@@ -1,0 +1,59 @@
+# Paperless-ngx on top of the cloud-backed document store.
+#
+# Use this for a NEW installation. To add cloud storage to an EXISTING
+# Paperless instance, keep your own compose file and apply the changes in
+# docs/RETROFIT.md instead — you only need the volume block below.
+#
+# Run:  docker compose -f compose/paperless.yml up -d
+
+services:
+  broker:
+    image: redis:8
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    volumes:
+      # postgres:18 expects the mount here, no longer at .../data.
+      # Using the old path makes the container restart in a loop.
+      - pgdata:/var/lib/postgresql
+    environment:
+      POSTGRES_DB: paperless
+      POSTGRES_USER: paperless
+      POSTGRES_PASSWORD: ${PAPERLESS_DBPASS:?set PAPERLESS_DBPASS in .env}
+
+  webserver:
+    image: ghcr.io/paperless-ngx/paperless-ngx:3.0.2
+    restart: unless-stopped
+    depends_on:
+      - db
+      - broker
+    ports:
+      - "${PAPERLESS_PORT:-8000}:8000"
+    volumes:
+      # Database, search index and working files stay local: they need real
+      # locking and random writes, which no cloud mount can guarantee.
+      - data:/usr/src/paperless/data
+      - ${BASE_DIR:?set BASE_DIR in .env}/consume:/usr/src/paperless/consume
+      - ${BASE_DIR:?}/export:/usr/src/paperless/export
+
+      # CRITICAL — propagation: rslave
+      # Without it the container keeps a dead FUSE mount after rclone
+      # restarts ("Transport endpoint is not connected") and only recovers
+      # with a full container restart. With it, the container picks the
+      # re-created mount up by itself.
+      - type: bind
+        source: ${BASE_DIR:?}/media
+        target: /usr/src/paperless/media
+        bind:
+          propagation: rslave
+
+    env_file: ./paperless.env
+
+volumes:
+  data:
+  pgdata:
+  redisdata:

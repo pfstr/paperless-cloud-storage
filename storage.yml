@@ -1,0 +1,72 @@
+# Cloud storage layer — independent of Paperless.
+#
+# One container does both jobs: it serves rclone's built-in web GUI (guided
+# remote setup, mount management) and it performs the FUSE mount itself.
+# rclone ships the GUI inside the binary since v1.74, so no extra image.
+#
+# Run:  docker compose -f compose/storage.yml up -d
+# Then: open the GUI and add your remote + mount (see README).
+#
+# Prerequisite: sudo ./setup.sh — the media directory must be a SHARED mount
+# point or the container cannot publish its mount to the host.
+
+services:
+  rclone:
+    image: rclone/rclone:latest
+    container_name: rclone-web
+    restart: unless-stopped
+
+    # The GUI is served on 5522, the RC API it talks to on 5533.
+    # bind-publish.sh mirrors mounts created under /mnt/inner to the host-shared
+    # /data — see the script header for why FUSE cannot mount there directly.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        /bin/sh /usr/local/bin/bind-publish.sh &
+        exec rclone gui --no-open-browser
+        --addr=0.0.0.0:5522 --api-addr=0.0.0.0:5533
+        --user="$${RCLONE_GUI_USER:-admin}" --pass="$${RCLONE_GUI_PASS}"
+    environment:
+      RCLONE_GUI_USER: ${RCLONE_GUI_USER:-admin}
+      RCLONE_GUI_PASS: ${RCLONE_GUI_PASS:?set RCLONE_GUI_PASS in .env}
+
+    # SECURITY: bound to localhost only. Anyone who reaches this UI can read
+    # your cloud credentials and create mounts. Reach it through an SSH tunnel
+    #   ssh -L 5522:localhost:5522 -L 5533:localhost:5533 <host>
+    # or put a reverse proxy with authentication in front of it. Do not
+    # publish these ports to the network.
+    ports:
+      - "127.0.0.1:5522:5522"
+      - "127.0.0.1:5533:5533"
+
+    # FUSE inside a container needs all three of these.
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse:/dev/fuse
+    security_opt:
+      - apparmor:unconfined
+
+    volumes:
+      # rclone.conf lives here — this is where your cloud credentials end up.
+      - ${BASE_DIR:?set BASE_DIR in .env}/rclone-config:/config/rclone
+      # VFS cache: bounds how much of the archive is held locally.
+      - ${BASE_DIR:?}/cache:/cache
+      # publishes /inner mounts to /data (see script header for why)
+      - ./bind-publish.sh:/usr/local/bin/bind-publish.sh:ro
+      # rshared: lets the mount created inside this container appear on the
+      # host, from where Paperless picks it up via rslave.
+      - type: bind
+        source: ${BASE_DIR:?}/media
+        target: /data
+        bind:
+          propagation: rshared
+
+    healthcheck:
+      test: ["CMD", "rclone", "rc", "--url", "127.0.0.1:5533",
+             "--user", "${RCLONE_GUI_USER:-admin}", "--pass", "${RCLONE_GUI_PASS}",
+             "core/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
