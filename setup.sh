@@ -104,7 +104,7 @@ Done. Next steps (no root needed from here on):
   2. docker compose -f storage.yml up -d
   3. Open the rclone web UI, add your cloud remote and create the mount:
        ssh -L 5522:localhost:5522 -L 5533:localhost:5533 <this-host>
-       http://localhost:5522/login?url=http%3A%2F%2Flocalhost%3A5533
+       then open the link printed by: docker logs rclone-web | grep "GUI available"
   4. Start Paperless (new install: paperless.yml,
      existing install: see docs/RETROFIT.md)
 DONE

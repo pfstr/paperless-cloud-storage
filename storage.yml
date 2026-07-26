@@ -19,25 +19,31 @@ services:
     # The GUI is served on 5522, the RC API it talks to on 5533.
     # bind-publish.sh mirrors mounts created under /mnt/inner to the host-shared
     # /data — see the script header for why FUSE cannot mount there directly.
+    #
+    # host networking + binding to localhost: the gui command derives its CORS
+    # allow-origin from --addr. Binding 0.0.0.0 behind a port mapping yields
+    # an origin of "http://[::]:5522", which never matches the browser's
+    # "http://localhost:5522" — every API call then fails with
+    # "Failed to fetch". With host networking and --addr=localhost the origin
+    # matches, and the ports stay loopback-only exactly as before.
+    network_mode: host
     entrypoint: ["/bin/sh", "-c"]
     command:
       - >
         /bin/sh /usr/local/bin/bind-publish.sh &
         exec rclone gui --no-open-browser
-        --addr=0.0.0.0:5522 --api-addr=0.0.0.0:5533
+        --addr=localhost:5522 --api-addr=localhost:5533
         --user="$${RCLONE_GUI_USER:-admin}" --pass="$${RCLONE_GUI_PASS}"
     environment:
       RCLONE_GUI_USER: ${RCLONE_GUI_USER:-admin}
       RCLONE_GUI_PASS: ${RCLONE_GUI_PASS:?set RCLONE_GUI_PASS in .env}
 
-    # SECURITY: bound to localhost only. Anyone who reaches this UI can read
-    # your cloud credentials and create mounts. Reach it through an SSH tunnel
+    # SECURITY: bound to the host's loopback only (via --addr above). Anyone
+    # who reaches this UI can read your cloud credentials and create mounts.
+    # Reach it through an SSH tunnel
     #   ssh -L 5522:localhost:5522 -L 5533:localhost:5533 <host>
     # or put a reverse proxy with authentication in front of it. Do not
-    # publish these ports to the network.
-    ports:
-      - "127.0.0.1:5522:5522"
-      - "127.0.0.1:5533:5533"
+    # expose these ports to the network.
 
     # FUSE inside a container needs all three of these.
     cap_add:

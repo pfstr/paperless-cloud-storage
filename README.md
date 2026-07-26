@@ -23,13 +23,13 @@ Everything after that — connecting the cloud account, creating and managing mo
 ssh -L 5522:localhost:5522 -L 5533:localhost:5533 <your-host>
 ```
 
-then open:
+then grab the ready-made login link (it includes the credentials) on the server:
 
-```
-http://localhost:5522/login?url=http%3A%2F%2Flocalhost%3A5533
+```bash
+docker logs rclone-web 2>&1 | grep "GUI available"
 ```
 
-The `url` parameter must be a full URL including `http://` (URL-encoded as above) — with just `localhost:5533` the login page reports "URL is not configured". Log in with the user and password from your `.env`.
+and open that link in your browser **exactly as printed** — it uses `127.0.0.1`, and that matters: the API only accepts browser requests from the origin it is bound to, so `localhost` instead of `127.0.0.1` (or a missing `http://` in the `url` parameter) fails with "Failed to fetch" or "URL is not configured".
 
 In the GUI, add your cloud remote, then create the mount at **`/mnt/inner/documents/originals`** with VFS cache mode `full` and **allow other** enabled. A helper inside the container (`bind-publish.sh`) automatically mirrors everything mounted under `/mnt/inner` to the host — a few seconds later it appears at `$BASE_DIR/media/documents/originals`, where Paperless picks it up. (Why the detour via `/mnt/inner`: see critical detail 2 below.)
 
