@@ -74,6 +74,8 @@ So "2FA on + secret stored" is strictly better than "2FA off". The dedicated acc
 
 Why a one-time code does not work: a Proton session established with a typed 2FA code dies after ~35 minutes and cannot re-authenticate unattended (`422 .../auth/v4/2fa`) — rclone would re-send the long-expired code. Observed symptoms are shifting directory listings, then nothing.
 
+**Outlook — Proton's official SDK:** Proton is building an [official SDK with a CLI](https://github.com/ProtonDriveApps/sdk) whose auth model is exactly what this setup lacks: one browser login (2FA included), session in the OS secret store, refresh handled by the SDK. It cannot mount, so it does not replace rclone here — but once the SDK is released for third-party production use and mount-capable tooling builds on it, the session problem disappears at the root.
+
 ## Settings explained (`paperless.env.example`)
 
 | Setting | Why |
